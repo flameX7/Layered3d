@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+
+  #container {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  /* ── Arrow Buttons ── */
+  .arrow-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    padding: 16px;
+    z-index: 10;
+  }
+  .arrow-btn:hover:not(:disabled) { opacity: 1; }
+  .arrow-btn:disabled { opacity: 0.15; cursor: not-allowed; }
+  .arrow-btn svg { width: 32px; height: 32px; }
+
+  #btn-prev { left: 16px; }
+  #btn-next { right: 16px; }
+
+  /* ── Step Counter ── */
+  #step-counter {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.7);
+    font-family: sans-serif;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* ── Loading ── */
+  #loading {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 100;
+  }
+  #loading-text {
+    color: rgba(255,255,255,0.6);
+    font-family: sans-serif;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+  }
+  #loading-bar-outer {
+    width: 160px;
+    height: 2px;
+    background: rgba(255,255,255,0.15);
+  }
+  #loading-bar-inner {
+    height: 100%;
+    background: rgba(255,255,255,0.6);
+    width: 0%;
+    transition: width 0.3s;
+  }
+</style>
+</head>
+<body>
+<div id="container">
+
+  <!-- Loading screen -->
+  <div id="loading">
+    <div id="loading-text">LOADING</div>
+    <div id="loading-bar-outer">
+      <div id="loading-bar-inner"></div>
+    </div>
+  </div>
+
+  <!-- Previous arrow -->
+  <button class="arrow-btn" id="btn-prev" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 18 9 12 15 6"></polyline>
+    </svg>
+  </button>
+
+  <!-- Next arrow -->
+  <button class="arrow-btn" id="btn-next">
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </button>
+
+  <!-- Step counter -->
+  <div id="step-counter">1 / 1</div>
+
+</div>
+
+<!-- ============================================================
+  THREE.JS IMPORTS — Do not edit
+============================================================ -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ================================================================
+//  ✏️  EDIT THIS SECTION FOR EVERY NEW PROJECT
+// ================================================================
+
+// 1. Total number of layers in this build
+const TOTAL_LAYERS = 6;
+
+// 2. Base URL — your GitHub Pages repository URL
+//    Format: https://YOUR-USERNAME.github.io/YOUR-REPO-NAME/
+//    Example: https://flamex7.github.io/my-new-build/
+const BASE_URL = 'https://flamex7.github.io/Layered3d/';
+
+// 3. File names for each layer GLB
+//    Add or remove entries to match TOTAL_LAYERS above
+//    Files must be uploaded to the GitHub repository above
+const LAYER_FILES = [
+  'layer1.glb',   // Layer 1 — ground floor
+  'layer2.glb',   // Layer 2
+  'layer3.glb',   // Layer 3
+  'layer4.glb',   // Layer 4
+  'layer5.glb',   // Layer 5
+  'layer6.glb',   // Layer 6 — top floor
+];
+
+// 4. Camera starting position — adjust to frame your build nicely
+//    (x, y, z) — increase y to look more from above, increase z to zoom out
+const CAMERA_POSITION = { x: 8, y: 8, z: 14 };
+
+// 5. Camera target — where the camera looks at (center of your build)
+//    Usually leave at 0,2,0 — adjust y if your build is very tall or short
+const CAMERA_TARGET = { x: 0, y: 2, z: 0 };
+
+// 6. Layers mode:
+//    'cumulative' — each step adds a layer on top of previous (building up)
+//    'single'     — each step shows only that one layer
+const LAYER_MODE = 'cumulative';
+
+// ================================================================
+//  ⚙️  SCENE SETUP — No need to edit below unless advanced changes
+// ================================================================
+
+const container = document.getElementById('container');
+
+// Renderer — transparent background
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setClearColor(0x000000, 0);
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
+
+// Scene
+const scene = new THREE.Scene();
+
+// Camera
+const camera = new THREE.PerspectiveCamera(
+  45,
+  container.clientWidth / container.clientHeight,
+  0.1,
+  1000
+);
+camera.position.set(CAMERA_POSITION.x, CAMERA_POSITION.y, CAMERA_POSITION.z);
+
+// Orbit controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 2;
+controls.maxDistance = 60;
+controls.target.set(CAMERA_TARGET.x, CAMERA_TARGET.y, CAMERA_TARGET.z);
+controls.update();
+
+// ── Lighting ──
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(10, 20, 10);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0xaabbff, 0.25);
+fillLight.position.set(-10, 5, -10);
+scene.add(fillLight);
+
+// ── White grid floor ──
+const gridHelper = new THREE.GridHelper(24, 24, 0xffffff, 0xffffff);
+gridHelper.material.opacity = 0.15;
+gridHelper.material.transparent = true;
+gridHelper.position.y = -0.01;
+scene.add(gridHelper);
+
+// ================================================================
+//  📦  LAYER LOADING
+// ================================================================
+
+const loader = new GLTFLoader();
+const layerGroups = [];
+let currentLayer = 0;
+
+const loadingBar = document.getElementById('loading-bar-inner');
+const loadingText = document.getElementById('loading-text');
+
+async function loadLayer(index) {
+  return new Promise((resolve) => {
+    const url = BASE_URL + LAYER_FILES[index];
+    loader.load(
+      url,
+      (gltf) => {
+        const group = new THREE.Group();
+        gltf.scene.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            // Keep Minecraft pixel art style — no texture blurring
+            if (child.material && child.material.map) {
+              child.material.map.magFilter = THREE.NearestFilter;
+              child.material.map.minFilter = THREE.NearestFilter;
+            }
+          }
+        });
+        group.add(gltf.scene);
+        group.visible = false;
+        scene.add(group);
+        layerGroups[index] = group;
+        resolve();
+      },
+      undefined,
+      () => {
+        // If a layer fails, store null and continue
+        layerGroups[index] = null;
+        resolve();
+      }
+    );
+  });
+}
+
+async function loadAll() {
+  for (let i = 0; i < TOTAL_LAYERS; i++) {
+    loadingText.textContent = `LOADING ${i + 1} / ${TOTAL_LAYERS}`;
+    await loadLayer(i);
+    loadingBar.style.width = `${((i + 1) / TOTAL_LAYERS) * 100}%`;
+  }
+  document.getElementById('loading').style.display = 'none';
+  showLayer(0);
+}
+
+// ================================================================
+//  🎮  LAYER NAVIGATION
+// ================================================================
+
+function showLayer(index) {
+  if (index < 0 || index >= TOTAL_LAYERS) return;
+  currentLayer = index;
+
+  for (let i = 0; i < TOTAL_LAYERS; i++) {
+    if (!layerGroups[i]) continue;
+    if (LAYER_MODE === 'cumulative') {
+      layerGroups[i].visible = i <= index;
+    } else {
+      layerGroups[i].visible = i === index;
+    }
+  }
+
+  // Update step counter
+  document.getElementById('step-counter').textContent =
+    `${index + 1} / ${TOTAL_LAYERS}`;
+
+  // Update buttons
+  document.getElementById('btn-prev').disabled = index === 0;
+  document.getElementById('btn-next').disabled = index === TOTAL_LAYERS - 1;
+}
+
+// Button listeners
+document.getElementById('btn-prev').addEventListener('click', () => showLayer(currentLayer - 1));
+document.getElementById('btn-next').addEventListener('click', () => showLayer(currentLayer + 1));
+
+// Keyboard navigation — left/right arrow keys
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowUp')   showLayer(currentLayer + 1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowDown') showLayer(currentLayer - 1);
+});
+
+// ================================================================
+//  🔄  RENDER LOOP
+// ================================================================
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// Handle window resize
+window.addEventListener('resize', () => {
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// Start
+animate();
+loadAll();
+</script>
+</body>
+</html>
